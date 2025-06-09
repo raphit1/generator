@@ -1,100 +1,62 @@
-import {
-  Client,
-  GatewayIntentBits,
-  ButtonBuilder,
-  ActionRowBuilder,
-  ButtonStyle,
-  Events,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
-  InteractionType,
-} from 'discord.js';
+import { Client, GatewayIntentBits, Events } from 'discord.js';
+import fetch from 'node-fetch';
 import dotenv from 'dotenv';
-import axios from 'axios';
 
 dotenv.config();
 
-const TOKEN = process.env.TOKEN; // ✅ Correction ici
-const CHANNEL_ID = '1381587397724340365';
+const TOKEN = process.env.DISCORD_TOKEN;
+const HF_TOKEN = process.env.HF_TOKEN;
+const CHANNEL_ID = '1381587397724340365';  // Ton salon Discord
 
 const client = new Client({
   intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.Guilds, 
+    GatewayIntentBits.GuildMessages, 
+    GatewayIntentBits.MessageContent
   ],
 });
 
-client.once('ready', async () => {
+client.once('ready', () => {
   console.log(`✅ Connecté en tant que ${client.user.tag}`);
-  const channel = await client.channels.fetch(CHANNEL_ID);
-
-  if (channel) {
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('generate_image')
-        .setLabel('🎨 Générer une image')
-        .setStyle(ButtonStyle.Primary)
-    );
-
-    await channel.send({
-      content: 'Clique sur le bouton pour générer une image :',
-      components: [row],
-    });
-  }
 });
 
-client.on(Events.InteractionCreate, async (interaction) => {
-  if (interaction.channelId !== CHANNEL_ID) return;
+client.on(Events.MessageCreate, async (message) => {
+  if (message.channel.id !== CHANNEL_ID || message.author.bot) return;
 
-  // Si l'utilisateur clique sur le bouton
-  if (interaction.isButton() && interaction.customId === 'generate_image') {
-    const modal = new ModalBuilder()
-      .setCustomId('image_prompt')
-      .setTitle('Générer une image');
+  if (message.content.startsWith('!image ')) {
+    const prompt = message.content.slice(7).trim();
+    if (!prompt) return message.channel.send('❌ Merci de fournir un texte après !image');
 
-    const input = new TextInputBuilder()
-      .setCustomId('prompt_input')
-      .setLabel('Décris ton image')
-      .setStyle(TextInputStyle.Short)
-      .setPlaceholder('ex: chat astronaute sur la lune')
-      .setRequired(true);
-
-    const row = new ActionRowBuilder().addComponents(input);
-    modal.addComponents(row);
-
-    await interaction.showModal(modal);
-  }
-
-  // Si l'utilisateur envoie le prompt
-  if (
-    interaction.type === InteractionType.ModalSubmit &&
-    interaction.customId === 'image_prompt'
-  ) {
-    const prompt = interaction.fields.getTextInputValue('prompt_input');
-
-    await interaction.deferReply();
+    await message.channel.send(`🎨 Génération de l'image pour : "${prompt}" ...`);
 
     try {
-      const res = await axios.get(
-        `https://lexica.art/api/v1/search?q=${encodeURIComponent(prompt)}`
+      const response = await fetch(
+        'https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${HF_TOKEN}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ inputs: prompt }),
+        }
       );
-      const images = res.data.images;
 
-      if (!images.length) {
-        return interaction.editReply('❌ Aucune image trouvée.');
+      if (!response.ok) {
+        const errorText = await response.text();
+        return message.channel.send(`❌ Erreur API : ${errorText}`);
       }
 
-      const img = images[Math.floor(Math.random() * images.length)];
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
 
-      await interaction.editReply({
-        content: `🖼️ Prompt : **${prompt}**`,
-        files: [img.src],
+      await message.channel.send({
+        content: `🖼️ Image générée pour : **${prompt}**`,
+        files: [{ attachment: buffer, name: 'image.png' }],
       });
-    } catch (err) {
-      console.error(err);
-      interaction.editReply('🚫 Une erreur est survenue.');
+    } catch (error) {
+      console.error(error);
+      message.channel.send('🚫 Une erreur est survenue lors de la génération.');
     }
   }
 });
