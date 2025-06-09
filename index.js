@@ -232,17 +232,6 @@ client.on(Events.InteractionCreate, async interaction => {
         return interaction.editReply(`❌ Aucune image trouvée pour : **${prompt}**`);
       }
 
-      const embeds = await create
-      if (interaction.type === InteractionType.ModalSubmit && interaction.customId === 'keyword_modal') {
-    const prompt = interaction.fields.getTextInputValue('keyword_input').trim();
-    await interaction.deferReply();
-
-    try {
-      const images = await searchPixabayImages(prompt, 3);
-      if (images.length === 0) {
-        return interaction.editReply(`❌ Aucune image trouvée pour : **${prompt}**`);
-      }
-
       const embeds = await createEmbedsFromImages(images, prompt);
 
       const regenerateBtn = new ButtonBuilder()
