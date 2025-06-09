@@ -1,14 +1,14 @@
 {
   "name": "discord-bot",
   "version": "1.0.0",
-  "type": "module",
+  "description": "Bot Discord générateur d'images via Hugging Face",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.6.8",
-    "discord.js": "^14.14.1",
+    "axios": "^1.9.0",
+    "discord.js": "^14.11.0",
     "dotenv": "^16.3.1"
   }
 }
