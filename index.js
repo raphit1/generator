@@ -16,7 +16,7 @@ import fetch from 'node-fetch';
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY;
-const CHANNEL_ID = process.env.CHANNEL_ID;
+const CHANNEL_ID = '1381587397724340365'; // salon fixé en dur
 
 if (!TOKEN) {
   console.error('❌ ERREUR: La variable d\'environnement DISCORD_TOKEN est manquante.');
@@ -24,10 +24,6 @@ if (!TOKEN) {
 }
 if (!PIXABAY_API_KEY) {
   console.error('❌ ERREUR: La variable d\'environnement PIXABAY_API_KEY est manquante.');
-  process.exit(1);
-}
-if (!CHANNEL_ID) {
-  console.error('❌ ERREUR: La variable d\'environnement CHANNEL_ID est manquante.');
   process.exit(1);
 }
 
