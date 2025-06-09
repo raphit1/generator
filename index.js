@@ -15,69 +15,48 @@ import {
 import fetch from 'node-fetch';
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY;
-const CHANNEL_ID = '1381587397724340365'; // salon fixé en dur
+const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY;
+const CHANNEL_ID = process.env.CHANNEL_ID;
 
-if (!TOKEN) {
-  console.error('❌ ERREUR: La variable d\'environnement DISCORD_TOKEN est manquante.');
+if (!TOKEN || !UNSPLASH_ACCESS_KEY || !CHANNEL_ID) {
+  console.error('❌ Variables d\'environnement manquantes (DISCORD_TOKEN, UNSPLASH_ACCESS_KEY, CHANNEL_ID)');
   process.exit(1);
 }
-if (!PIXABAY_API_KEY) {
-  console.error('❌ ERREUR: La variable d\'environnement PIXABAY_API_KEY est manquante.');
-  process.exit(1);
-}
-
-console.log('✅ Variables d\'environnement chargées :');
-console.log(` - DISCORD_TOKEN : ${TOKEN ? 'OK' : 'MANQUANT'}`);
-console.log(` - PIXABAY_API_KEY : ${PIXABAY_API_KEY ? 'OK' : 'MANQUANT'}`);
-console.log(` - CHANNEL_ID : ${CHANNEL_ID}`);
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
-const RANDOM_BASE_KEYWORD = 'nature'; // mot clé large pour images aléatoires
-const MAX_PIXABAY_RESULTS = 50; // max Pixabay par requête (max 200 autorisé)
-
-async function searchPixabayImages(query, per_page = 3, offset = 0) {
-  const page = Math.floor(offset / per_page) + 1;
-  const url = `https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(query)}&image_type=photo&per_page=${per_page}&page=${page}`;
+async function searchUnsplashImages(query, per_page = 3, page = 1) {
+  const url = `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&per_page=${per_page}&page=${page}&client_id=${UNSPLASH_ACCESS_KEY}`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`Pixabay API error: ${res.status}`);
+  if (!res.ok) throw new Error(`Unsplash API error: ${res.status}`);
   const data = await res.json();
-  return data.hits || [];
-}
-
-function shuffleArray(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-}
-
-function getRandomOffset(maxResults, per_page) {
-  if (maxResults <= per_page) return 0;
-  return Math.floor(Math.random() * Math.floor(maxResults / per_page)) * per_page;
+  return data.results || [];
 }
 
 async function getRandomImages(per_page = 3) {
-  const urlTotal = `https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(RANDOM_BASE_KEYWORD)}&image_type=photo&per_page=3&page=1`;
-  const resTotal = await fetch(urlTotal);
-  if (!resTotal.ok) throw new Error(`Pixabay API error: ${resTotal.status}`);
-  const dataTotal = await resTotal.json();
-  const totalHits = Math.min(dataTotal.totalHits, 200);
+  // Unsplash ne propose pas d'endpoint "random multiple" directement
+  // On fait une recherche aléatoire sur un mot-clé large et on shuffle les résultats
 
-  const offset = getRandomOffset(totalHits, per_page);
-  const images = await searchPixabayImages(RANDOM_BASE_KEYWORD, per_page, offset);
-  return images;
+  const broadKeywords = ['nature', 'landscape', 'animal', 'city', 'travel', 'mountain'];
+  const randomKeyword = broadKeywords[Math.floor(Math.random() * broadKeywords.length)];
+  const images = await searchUnsplashImages(randomKeyword, 30, 1); // récupère 30 images max
+  if (images.length === 0) return [];
+  // shuffle et prend per_page images
+  for (let i = images.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [images[i], images[j]] = [images[j], images[i]];
+  }
+  return images.slice(0, per_page);
 }
 
-async function createEmbedsFromImages(images, prompt) {
+function createEmbedsFromImages(images, prompt) {
   return images.map(img => new EmbedBuilder()
     .setTitle(`Image pour : ${prompt}`)
-    .setURL(img.pageURL)
-    .setImage(img.largeImageURL)
-    .setFooter({ text: `Photographe: ${img.user}` }));
+    .setURL(img.links.html)
+    .setImage(img.urls.regular)
+    .setFooter({ text: `Photographe: ${img.user.name}` }));
 }
 
 client.once(Events.ClientReady, async () => {
@@ -123,7 +102,7 @@ client.on(Events.InteractionCreate, async interaction => {
           return interaction.editReply('❌ Pas d\'images aléatoires trouvées, réessaie.');
         }
 
-        const embeds = await createEmbedsFromImages(images, 'aléatoire');
+        const embeds = createEmbedsFromImages(images, 'aléatoire');
         const regenerateBtn = new ButtonBuilder()
           .setCustomId('regenerate_random')
           .setLabel('🔄 Régénérer aléatoire')
@@ -186,7 +165,7 @@ client.on(Events.InteractionCreate, async interaction => {
           if (images.length === 0) {
             return interaction.followUp({ content: '❌ Pas d\'images aléatoires trouvées.', ephemeral: true });
           }
-          const embeds = await createEmbedsFromImages(images, 'aléatoire');
+          const embeds = createEmbedsFromImages(images, 'aléatoire');
           const btn = new ButtonBuilder()
             .setCustomId('regenerate_random')
             .setLabel('🔄 Régénérer aléatoire')
@@ -197,11 +176,11 @@ client.on(Events.InteractionCreate, async interaction => {
 
         } else {
           const prompt = suffix;
-          const images = await searchPixabayImages(prompt, 3);
+          const images = await searchUnsplashImages(prompt, 3);
           if (images.length === 0) {
             return interaction.followUp({ content: `❌ Aucune image trouvée pour : **${prompt}**`, ephemeral: true });
           }
-          const embeds = await createEmbedsFromImages(images, prompt);
+          const embeds = createEmbedsFromImages(images, prompt);
           const btn = new ButtonBuilder()
             .setCustomId(`regenerate_${prompt}`)
             .setLabel('🔄 Régénérer')
@@ -223,12 +202,12 @@ client.on(Events.InteractionCreate, async interaction => {
     await interaction.deferReply();
 
     try {
-      const images = await searchPixabayImages(prompt, 3);
+      const images = await searchUnsplashImages(prompt, 3);
       if (images.length === 0) {
         return interaction.editReply(`❌ Aucune image trouvée pour : **${prompt}**`);
       }
 
-      const embeds = await createEmbedsFromImages(images, prompt);
+      const embeds = createEmbedsFromImages(images, prompt);
 
       const regenerateBtn = new ButtonBuilder()
         .setCustomId(`regenerate_${prompt}`)
