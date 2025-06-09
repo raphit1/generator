@@ -16,19 +16,16 @@ import fetch from 'node-fetch';
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY;
-const CHANNEL_ID = process.env.CHANNEL_ID;
+const CHANNEL_ID = '1381587397724340365'; // défini en dur
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
-const RANDOM_BASE_KEYWORD = 'nature'; // mot clé large pour images aléatoires
-const MAX_PIXABAY_RESULTS = 50; // max Pixabay par requête (max 200 autorisé)
+const RANDOM_BASE_KEYWORD = 'nature';
+const MAX_PIXABAY_RESULTS = 50;
 
 async function searchPixabayImages(query, per_page = 3, offset = 0) {
-  // Pixabay ne supporte pas offset, mais on peut utiliser page
-  // Calcul page à partir offset: page = floor(offset / per_page) + 1
-  // offset modulo per_page est pour décaler dans la page, on ignore ici
   const page = Math.floor(offset / per_page) + 1;
   const url = `https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(query)}&image_type=photo&per_page=${per_page}&page=${page}`;
   const res = await fetch(url);
@@ -37,30 +34,18 @@ async function searchPixabayImages(query, per_page = 3, offset = 0) {
   return data.hits || [];
 }
 
-function shuffleArray(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-}
-
 function getRandomOffset(maxResults, per_page) {
   if (maxResults <= per_page) return 0;
   return Math.floor(Math.random() * Math.floor(maxResults / per_page)) * per_page;
 }
 
 async function getRandomImages(per_page = 3) {
-  // Pixabay limite max à 200 résultats max
-  // On récupère 50 résultats max par page, on fait un offset random pour la page
-  // Première requête pour connaître totalHits
   const urlTotal = `https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(RANDOM_BASE_KEYWORD)}&image_type=photo&per_page=3&page=1`;
   const resTotal = await fetch(urlTotal);
   if (!resTotal.ok) throw new Error(`Pixabay API error: ${resTotal.status}`);
   const dataTotal = await resTotal.json();
-  const totalHits = Math.min(dataTotal.totalHits, 200); // Pixabay max 200 résultats accessibles
-
+  const totalHits = Math.min(dataTotal.totalHits, 200);
   const offset = getRandomOffset(totalHits, per_page);
-  // Requête avec offset (page calculée)
   const images = await searchPixabayImages(RANDOM_BASE_KEYWORD, per_page, offset);
   return images;
 }
@@ -106,29 +91,25 @@ client.on(Events.InteractionCreate, async interaction => {
         if (images.length === 0) {
           return interaction.editReply('❌ Pas d\'images aléatoires trouvées, réessaie.');
         }
-
         const embeds = await createEmbedsFromImages(images, 'aléatoire');
         const regenerateBtn = new ButtonBuilder()
           .setCustomId('regenerate_random')
           .setLabel('🔄 Régénérer aléatoire')
           .setStyle(ButtonStyle.Secondary);
-
         const row = new ActionRowBuilder().addComponents(regenerateBtn);
 
         await interaction.editReply({ embeds, components: [row] });
 
-        // Nouveau message avec boutons de génération
+        // Nouveau message avec boutons
         const channel = await client.channels.fetch(CHANNEL_ID);
         const btnRandom = new ButtonBuilder()
           .setCustomId('generate_random')
           .setLabel('🎲 Générer image aléatoire')
           .setStyle(ButtonStyle.Success);
-
         const btnKeyword = new ButtonBuilder()
           .setCustomId('generate_keyword')
           .setLabel('🔍 Générer par mot-clé')
           .setStyle(ButtonStyle.Primary);
-
         const newRow = new ActionRowBuilder().addComponents(btnRandom, btnKeyword);
 
         await channel.send({
@@ -143,7 +124,6 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     if (interaction.customId === 'generate_keyword') {
-      // Ouvre modal pour mot-clé
       const modal = new ModalBuilder()
         .setCustomId('keyword_modal')
         .setTitle('Générer image par mot-clé');
@@ -156,7 +136,6 @@ client.on(Events.InteractionCreate, async interaction => {
         .setPlaceholder('ex: chat, désert, galaxie');
 
       modal.addComponents(new ActionRowBuilder().addComponents(input));
-
       return interaction.showModal(modal);
     }
 
@@ -167,7 +146,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
       try {
         if (suffix === 'random') {
-          // Régénérer aléatoire
           const images = await getRandomImages(3);
           if (images.length === 0) {
             return interaction.followUp({ content: '❌ Pas d\'images aléatoires trouvées.', ephemeral: true });
@@ -182,7 +160,6 @@ client.on(Events.InteractionCreate, async interaction => {
           await interaction.message.edit({ embeds, components: [row] });
 
         } else {
-          // Régénérer avec mot-clé (suffix = mot-clé)
           const prompt = suffix;
           const images = await searchPixabayImages(prompt, 3);
           if (images.length === 0) {
@@ -197,7 +174,6 @@ client.on(Events.InteractionCreate, async interaction => {
 
           await interaction.message.edit({ embeds, components: [row] });
         }
-
       } catch (error) {
         console.error(error);
         await interaction.followUp({ content: '❌ Erreur lors de la régénération.', ephemeral: true });
@@ -214,7 +190,6 @@ client.on(Events.InteractionCreate, async interaction => {
       if (images.length === 0) {
         return interaction.editReply(`❌ Aucune image trouvée pour : **${prompt}**`);
       }
-
       const embeds = await createEmbedsFromImages(images, prompt);
       const btn = new ButtonBuilder()
         .setCustomId(`regenerate_${prompt}`)
@@ -230,12 +205,10 @@ client.on(Events.InteractionCreate, async interaction => {
         .setCustomId('generate_random')
         .setLabel('🎲 Générer image aléatoire')
         .setStyle(ButtonStyle.Success);
-
       const btnKeyword = new ButtonBuilder()
         .setCustomId('generate_keyword')
         .setLabel('🔍 Générer par mot-clé')
         .setStyle(ButtonStyle.Primary);
-
       const newRow = new ActionRowBuilder().addComponents(btnRandom, btnKeyword);
 
       await channel.send({
@@ -251,3 +224,4 @@ client.on(Events.InteractionCreate, async interaction => {
 });
 
 client.login(TOKEN);
+``
