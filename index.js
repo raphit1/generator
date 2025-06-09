@@ -17,7 +17,9 @@ import fetch from 'node-fetch';
 const TOKEN = process.env.DISCORD_TOKEN;
 const REPLICATE_TOKEN = process.env.REPLICATE_API_TOKEN;
 const CHANNEL_ID = '1381587397724340365';
-const MODEL_VERSION = 'stability-ai/stable-diffusion:latest';
+
+// Remplace ceci par l'ID exact du modèle Replicate (voir ci-dessous)
+const MODEL_VERSION = 'db21e45a8b7e6612b8c3a96ccf5e146758a52f9c7acfa3f89448f6e8bcd3e365';
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
@@ -26,107 +28,110 @@ const client = new Client({
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Connecté en tant que ${client.user.tag}`);
 
-  // Envoie un message avec le bouton dans le salon au démarrage
   const channel = await client.channels.fetch(CHANNEL_ID);
-  if (!channel) {
-    console.error('Salon non trouvé');
-    return;
-  }
+  if (!channel) return console.error('Salon introuvable');
 
-  // Vérifier s'il y a déjà un message avec ce bouton, sinon en envoyer un
-  const sentMessages = await channel.messages.fetch({ limit: 10 });
-  if (!sentMessages.some(m => m.author.id === client.user.id)) {
-    const btn = new ButtonBuilder()
+  const messages = await channel.messages.fetch({ limit: 10 });
+  if (!messages.some(m => m.author.id === client.user.id)) {
+    const button = new ButtonBuilder()
       .setCustomId('open_modal')
       .setLabel('🎨 Générer une image')
       .setStyle(ButtonStyle.Primary);
+    const row = new ActionRowBuilder().addComponents(button);
 
-    const row = new ActionRowBuilder().addComponents(btn);
-
-    await channel.send({ content: 'Clique sur le bouton pour écrire la description de l’image.', components: [row] });
+    await channel.send({
+      content: 'Clique pour décrire ton image IA 👇',
+      components: [row]
+    });
   }
 });
 
 client.on(Events.InteractionCreate, async interaction => {
-  if (interaction.isButton()) {
-    if (interaction.customId === 'open_modal') {
-      // Créer la modal
-      const modal = new ModalBuilder()
-        .setCustomId('prompt_modal')
-        .setTitle('Génération d\'image');
+  if (interaction.isButton() && interaction.customId === 'open_modal') {
+    const modal = new ModalBuilder()
+      .setCustomId('prompt_modal')
+      .setTitle('Génération d\'image IA');
 
-      const input = new TextInputBuilder()
-        .setCustomId('prompt_input')
-        .setLabel('Écris ta description')
-        .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder('Ex: Un chien astronaute sur la lune')
-        .setRequired(true);
+    const input = new TextInputBuilder()
+      .setCustomId('prompt_input')
+      .setLabel('Décris ton image')
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true)
+      .setPlaceholder('Ex: Chat samouraï sur une moto en feu');
 
-      const row = new ActionRowBuilder().addComponents(input);
-      modal.addComponents(row);
+    modal.addComponents(new ActionRowBuilder().addComponents(input));
+    return interaction.showModal(modal);
+  }
 
-      await interaction.showModal(modal);
-    }
-  } else if (interaction.type === InteractionType.ModalSubmit) {
-    if (interaction.customId === 'prompt_modal') {
-      await interaction.deferReply();
+  if (interaction.type === InteractionType.ModalSubmit && interaction.customId === 'prompt_modal') {
+    const prompt = interaction.fields.getTextInputValue('prompt_input');
+    await interaction.deferReply();
 
-      const prompt = interaction.fields.getTextInputValue('prompt_input');
-      if (!prompt) {
-        return interaction.editReply('❌ Prompt vide.');
+    const countdown = await interaction.channel.send('⏳ Génération : 30s...');
+    let seconds = 30;
+    const interval = setInterval(() => {
+      seconds -= 5;
+      if (seconds > 0) countdown.edit(`⏳ Génération : ${seconds}s...`);
+    }, 5000);
+
+    try {
+      // Lancement de la génération
+      const res = await fetch('https://api.replicate.com/v1/predictions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Token ${REPLICATE_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          version: MODEL_VERSION,
+          input: { prompt }
+        })
+      });
+
+      const prediction = await res.json();
+      if (!prediction || !prediction.urls || !prediction.urls.get) {
+        throw new Error('Prediction API call failed');
       }
 
-      const countdown = await interaction.channel.send('⏳ Génération : 30 s');
-      let seconds = 30;
-      const timer = setInterval(() => {
-        seconds -= 5;
-        countdown.edit(`⏳ Génération : ${seconds}s`);
-      }, 5000);
+      // Attente de la génération
+      let output = null;
+      let status = prediction.status;
+      const start = Date.now();
 
-      try {
-        const res = await fetch('https://api.replicate.com/v1/predictions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Token ${REPLICATE_TOKEN}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            version: MODEL_VERSION,
-            input: { prompt }
-          })
+      while (!output && (Date.now() - start) < 60000) {
+        const poll = await fetch(prediction.urls.get, {
+          headers: { 'Authorization': `Token ${REPLICATE_TOKEN}` }
         });
-        const pred = await res.json();
+        const data = await poll.json();
 
-        const check = async () => {
-          const poll = await fetch(pred.urls.get, {
-            headers: { 'Authorization': `Token ${REPLICATE_TOKEN}` }
-          });
-          const j = await poll.json();
-          if (j.status === 'succeeded' && j.output?.length) {
-            clearInterval(timer);
-            await countdown.delete();
+        status = data.status;
+        if (status === 'succeeded') {
+          output = data.output;
+        } else if (status === 'failed') {
+          throw new Error('La génération a échoué.');
+        }
 
-            const embed = new EmbedBuilder()
-              .setTitle('🖼️ Image générée')
-              .setDescription(`Prompt : **${prompt}**`)
-              .setImage(j.output[j.output.length - 1])
-              .setColor('Blue');
-
-            await interaction.editReply({ embeds: [embed] });
-          } else if (j.status === 'failed') {
-            clearInterval(timer);
-            await interaction.editReply('❌ Échec de la génération.');
-          } else {
-            setTimeout(check, 2000);
-          }
-        };
-
-        check();
-      } catch (err) {
-        clearInterval(timer);
-        console.error(err);
-        await interaction.editReply('❌ Erreur lors de l’appel API.');
+        if (!output) await new Promise(r => setTimeout(r, 2000));
       }
+
+      clearInterval(interval);
+      await countdown.delete();
+
+      if (!output || !output.length) {
+        return await interaction.editReply('❌ Aucun résultat généré.');
+      }
+
+      const embed = new EmbedBuilder()
+        .setTitle('🖼️ Image générée')
+        .setDescription(`Prompt : **${prompt}**`)
+        .setImage(output[output.length - 1])
+        .setColor('Blue');
+
+      await interaction.editReply({ embeds: [embed] });
+    } catch (err) {
+      console.error('Erreur Replicate:', err);
+      clearInterval(interval);
+      await interaction.editReply('❌ Une erreur est survenue pendant la génération.');
     }
   }
 });
