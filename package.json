@@ -1,5 +1,5 @@
 {
-  "name": "discord-hf-image-bot",
+  "name": "discord-pixabay-image-bot",
   "version": "1.0.0",
   "main": "index.js",
   "type": "module",
