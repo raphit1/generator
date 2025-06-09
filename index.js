@@ -1,10 +1,21 @@
-import { Client, GatewayIntentBits, ButtonBuilder, ActionRowBuilder, ButtonStyle, Events, ModalBuilder, TextInputBuilder, TextInputStyle, InteractionType } from 'discord.js';
+import {
+  Client,
+  GatewayIntentBits,
+  ButtonBuilder,
+  ActionRowBuilder,
+  ButtonStyle,
+  Events,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  InteractionType,
+} from 'discord.js';
 import dotenv from 'dotenv';
 import axios from 'axios';
 
 dotenv.config();
 
-const TOKEN = process.env.DISCORD_TOKEN;
+const TOKEN = process.env.TOKEN; // ✅ Correction ici
 const CHANNEL_ID = '1381587397724340365';
 
 const client = new Client({
@@ -37,7 +48,7 @@ client.once('ready', async () => {
 client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.channelId !== CHANNEL_ID) return;
 
-  // Quand on clique sur le bouton
+  // Si l'utilisateur clique sur le bouton
   if (interaction.isButton() && interaction.customId === 'generate_image') {
     const modal = new ModalBuilder()
       .setCustomId('image_prompt')
@@ -56,14 +67,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
     await interaction.showModal(modal);
   }
 
-  // Quand on soumet le texte (modal)
-  if (interaction.type === InteractionType.ModalSubmit && interaction.customId === 'image_prompt') {
+  // Si l'utilisateur envoie le prompt
+  if (
+    interaction.type === InteractionType.ModalSubmit &&
+    interaction.customId === 'image_prompt'
+  ) {
     const prompt = interaction.fields.getTextInputValue('prompt_input');
 
     await interaction.deferReply();
 
     try {
-      const res = await axios.get(`https://lexica.art/api/v1/search?q=${encodeURIComponent(prompt)}`);
+      const res = await axios.get(
+        `https://lexica.art/api/v1/search?q=${encodeURIComponent(prompt)}`
+      );
       const images = res.data.images;
 
       if (!images.length) {
