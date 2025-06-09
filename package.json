@@ -1,7 +1,6 @@
 {
-  "name": "discord-image-bot",
+  "name": "discord-hf-image-bot",
   "version": "1.0.0",
-  "description": "Bot Discord pour générer des images via Replicate",
   "main": "index.js",
   "type": "module",
   "scripts": {
