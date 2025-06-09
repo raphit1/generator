@@ -18,7 +18,6 @@ const TOKEN = process.env.DISCORD_TOKEN;
 const REPLICATE_TOKEN = process.env.REPLICATE_API_TOKEN;
 const CHANNEL_ID = '1381587397724340365';
 
-// Modèle Stable Diffusion XL sur Replicate (version officielle)
 const MODEL_VERSION = 'stability-ai/sdxl:7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc';
 
 const client = new Client({
@@ -31,20 +30,18 @@ client.once(Events.ClientReady, async () => {
   const channel = await client.channels.fetch(CHANNEL_ID);
   if (!channel) return console.error('Salon introuvable');
 
-  const messages = await channel.messages.fetch({ limit: 10 });
-  if (!messages.some(m => m.author.id === client.user.id)) {
-    const button = new ButtonBuilder()
-      .setCustomId('open_modal')
-      .setLabel('🎨 Générer une image')
-      .setStyle(ButtonStyle.Primary);
+  // ➜ Toujours envoyer le bouton
+  const button = new ButtonBuilder()
+    .setCustomId('open_modal')
+    .setLabel('🎨 Générer une image')
+    .setStyle(ButtonStyle.Primary);
 
-    const row = new ActionRowBuilder().addComponents(button);
+  const row = new ActionRowBuilder().addComponents(button);
 
-    await channel.send({
-      content: 'Clique pour décrire ton image IA 👇',
-      components: [row]
-    });
-  }
+  await channel.send({
+    content: 'Clique pour décrire ton image IA 👇',
+    components: [row]
+  });
 });
 
 client.on(Events.InteractionCreate, async interaction => {
