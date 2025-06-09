@@ -10,187 +10,242 @@ import {
   TextInputBuilder,
   TextInputStyle,
   InteractionType,
-  ComponentType
+  EmbedBuilder
 } from 'discord.js';
 import fetch from 'node-fetch';
 
 const TOKEN = process.env.DISCORD_TOKEN;
-const HF_TOKEN = process.env.HF_TOKEN;
-const CHANNEL_ID = '1381587397724340365';
-
-const HF_API_URL = 'https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2';
+const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY;
+const CHANNEL_ID = process.env.CHANNEL_ID;
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
 
-// Fonction pour générer l'image via HF API
-async function generateImage(prompt) {
-  const res = await fetch(HF_API_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${HF_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ inputs: prompt })
-  });
+const RANDOM_BASE_KEYWORD = 'nature'; // mot clé large pour images aléatoires
+const MAX_PIXABAY_RESULTS = 50; // max Pixabay par requête (max 200 autorisé)
 
-  if (res.status === 503) {
-    throw new Error('Le serveur est occupé, réessaie dans quelques instants.');
+async function searchPixabayImages(query, per_page = 3, offset = 0) {
+  // Pixabay ne supporte pas offset, mais on peut utiliser page
+  // Calcul page à partir offset: page = floor(offset / per_page) + 1
+  // offset modulo per_page est pour décaler dans la page, on ignore ici
+  const page = Math.floor(offset / per_page) + 1;
+  const url = `https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(query)}&image_type=photo&per_page=${per_page}&page=${page}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Pixabay API error: ${res.status}`);
+  const data = await res.json();
+  return data.hits || [];
+}
+
+function shuffleArray(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
   }
+}
 
-  if (!res.ok) {
-    const errTxt = await res.text();
-    throw new Error(`Erreur API Hugging Face: ${res.status} ${errTxt}`);
-  }
+function getRandomOffset(maxResults, per_page) {
+  if (maxResults <= per_page) return 0;
+  return Math.floor(Math.random() * Math.floor(maxResults / per_page)) * per_page;
+}
 
-  const buffer = await res.arrayBuffer();
-  return Buffer.from(buffer);
+async function getRandomImages(per_page = 3) {
+  // Pixabay limite max à 200 résultats max
+  // On récupère 50 résultats max par page, on fait un offset random pour la page
+  // Première requête pour connaître totalHits
+  const urlTotal = `https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(RANDOM_BASE_KEYWORD)}&image_type=photo&per_page=3&page=1`;
+  const resTotal = await fetch(urlTotal);
+  if (!resTotal.ok) throw new Error(`Pixabay API error: ${resTotal.status}`);
+  const dataTotal = await resTotal.json();
+  const totalHits = Math.min(dataTotal.totalHits, 200); // Pixabay max 200 résultats accessibles
+
+  const offset = getRandomOffset(totalHits, per_page);
+  // Requête avec offset (page calculée)
+  const images = await searchPixabayImages(RANDOM_BASE_KEYWORD, per_page, offset);
+  return images;
+}
+
+async function createEmbedsFromImages(images, prompt) {
+  return images.map(img => new EmbedBuilder()
+    .setTitle(`Image pour : ${prompt}`)
+    .setURL(img.pageURL)
+    .setImage(img.largeImageURL)
+    .setFooter({ text: `Photographe: ${img.user}` }));
 }
 
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Connecté en tant que ${client.user.tag}`);
 
-  try {
-    const channel = await client.channels.fetch(CHANNEL_ID);
-    if (!channel) return console.error('Salon introuvable');
+  const channel = await client.channels.fetch(CHANNEL_ID);
+  if (!channel) return console.error('Salon introuvable');
 
-    const button = new ButtonBuilder()
-      .setCustomId('open_modal')
-      .setLabel('🎨 Générer une image')
-      .setStyle(ButtonStyle.Primary);
+  const btnRandom = new ButtonBuilder()
+    .setCustomId('generate_random')
+    .setLabel('🎲 Générer image aléatoire')
+    .setStyle(ButtonStyle.Success);
 
-    const row = new ActionRowBuilder().addComponents(button);
+  const btnKeyword = new ButtonBuilder()
+    .setCustomId('generate_keyword')
+    .setLabel('🔍 Générer par mot-clé')
+    .setStyle(ButtonStyle.Primary);
 
-    await channel.send({
-      content: 'Clique pour décrire ton image IA 👇',
-      components: [row]
-    });
+  const row = new ActionRowBuilder().addComponents(btnRandom, btnKeyword);
 
-  } catch (error) {
-    console.error('Erreur lors du fetch du salon :', error);
-  }
+  await channel.send({
+    content: 'Choisis une option pour générer des images :',
+    components: [row]
+  });
 });
 
 client.on(Events.InteractionCreate, async interaction => {
-  // Ouvrir modal
-  if (interaction.isButton() && interaction.customId === 'open_modal') {
-    const modal = new ModalBuilder()
-      .setCustomId('prompt_modal')
-      .setTitle('Génération d\'image IA');
-
-    const input = new TextInputBuilder()
-      .setCustomId('prompt_input')
-      .setLabel('Décris ton image')
-      .setStyle(TextInputStyle.Paragraph)
-      .setRequired(true)
-      .setPlaceholder('Ex: un chat en armure dans un désert');
-
-    modal.addComponents(new ActionRowBuilder().addComponents(input));
-    return interaction.showModal(modal);
-  }
-
-  // Soumission modal + génération + décompte + bouton régénérer
-  if (interaction.type === InteractionType.ModalSubmit && interaction.customId === 'prompt_modal') {
-    const prompt = interaction.fields.getTextInputValue('prompt_input');
-    await interaction.deferReply();
-
-    try {
-      // Envoi message initial avec compte à rebours
-      let countdown = 5;
-      const countdownMessage = await interaction.editReply(`⏳ Génération dans ${countdown} secondes...`);
-
-      // Décompte
-      const interval = setInterval(async () => {
-        countdown--;
-        if (countdown > 0) {
-          await interaction.editReply(`⏳ Génération dans ${countdown} secondes...`);
-        } else {
-          clearInterval(interval);
-
-          // Génération de l'image
-          try {
-            const imageBuffer = await generateImage(prompt);
-
-            // Bouton régénérer
-            const regenButton = new ButtonBuilder()
-              .setCustomId(`regen_${Date.now()}`) // id unique
-              .setLabel('🔄 Regénérer')
-              .setStyle(ButtonStyle.Secondary);
-
-            const row = new ActionRowBuilder().addComponents(regenButton);
-
-            await interaction.editReply({
-              content: `🖼️ Image générée pour : **${prompt}**`,
-              files: [{ attachment: imageBuffer, name: 'image.png' }],
-              components: [row]
-            });
-
-          } catch (error) {
-            console.error(error);
-            await interaction.editReply('❌ Une erreur est survenue lors de la génération.');
-          }
+  if (interaction.isButton()) {
+    if (interaction.customId === 'generate_random') {
+      await interaction.deferReply();
+      try {
+        const images = await getRandomImages(3);
+        if (images.length === 0) {
+          return interaction.editReply('❌ Pas d\'images aléatoires trouvées, réessaie.');
         }
-      }, 1000);
 
-    } catch (error) {
-      console.error(error);
-      await interaction.editReply('❌ Une erreur est survenue.');
+        const embeds = await createEmbedsFromImages(images, 'aléatoire');
+        const regenerateBtn = new ButtonBuilder()
+          .setCustomId('regenerate_random')
+          .setLabel('🔄 Régénérer aléatoire')
+          .setStyle(ButtonStyle.Secondary);
+
+        const row = new ActionRowBuilder().addComponents(regenerateBtn);
+
+        await interaction.editReply({ embeds, components: [row] });
+
+        // Nouveau message avec boutons de génération
+        const channel = await client.channels.fetch(CHANNEL_ID);
+        const btnRandom = new ButtonBuilder()
+          .setCustomId('generate_random')
+          .setLabel('🎲 Générer image aléatoire')
+          .setStyle(ButtonStyle.Success);
+
+        const btnKeyword = new ButtonBuilder()
+          .setCustomId('generate_keyword')
+          .setLabel('🔍 Générer par mot-clé')
+          .setStyle(ButtonStyle.Primary);
+
+        const newRow = new ActionRowBuilder().addComponents(btnRandom, btnKeyword);
+
+        await channel.send({
+          content: 'Tu veux une autre image ? Choisis ci-dessous :',
+          components: [newRow]
+        });
+
+      } catch (error) {
+        console.error(error);
+        await interaction.editReply('❌ Erreur lors de la génération aléatoire.');
+      }
+    }
+
+    if (interaction.customId === 'generate_keyword') {
+      // Ouvre modal pour mot-clé
+      const modal = new ModalBuilder()
+        .setCustomId('keyword_modal')
+        .setTitle('Générer image par mot-clé');
+
+      const input = new TextInputBuilder()
+        .setCustomId('keyword_input')
+        .setLabel('Entre un mot-clé')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setPlaceholder('ex: chat, désert, galaxie');
+
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
+
+      return interaction.showModal(modal);
+    }
+
+    if (interaction.customId.startsWith('regenerate_')) {
+      await interaction.deferUpdate();
+
+      const suffix = interaction.customId.replace('regenerate_', '');
+
+      try {
+        if (suffix === 'random') {
+          // Régénérer aléatoire
+          const images = await getRandomImages(3);
+          if (images.length === 0) {
+            return interaction.followUp({ content: '❌ Pas d\'images aléatoires trouvées.', ephemeral: true });
+          }
+          const embeds = await createEmbedsFromImages(images, 'aléatoire');
+          const btn = new ButtonBuilder()
+            .setCustomId('regenerate_random')
+            .setLabel('🔄 Régénérer aléatoire')
+            .setStyle(ButtonStyle.Secondary);
+          const row = new ActionRowBuilder().addComponents(btn);
+
+          await interaction.message.edit({ embeds, components: [row] });
+
+        } else {
+          // Régénérer avec mot-clé (suffix = mot-clé)
+          const prompt = suffix;
+          const images = await searchPixabayImages(prompt, 3);
+          if (images.length === 0) {
+            return interaction.followUp({ content: `❌ Aucune image trouvée pour : **${prompt}**`, ephemeral: true });
+          }
+          const embeds = await createEmbedsFromImages(images, prompt);
+          const btn = new ButtonBuilder()
+            .setCustomId(`regenerate_${prompt}`)
+            .setLabel('🔄 Régénérer')
+            .setStyle(ButtonStyle.Secondary);
+          const row = new ActionRowBuilder().addComponents(btn);
+
+          await interaction.message.edit({ embeds, components: [row] });
+        }
+
+      } catch (error) {
+        console.error(error);
+        await interaction.followUp({ content: '❌ Erreur lors de la régénération.', ephemeral: true });
+      }
     }
   }
 
-  // Gestion du clic sur bouton "Regénérer"
-  if (interaction.isButton() && interaction.customId.startsWith('regen_')) {
+  if (interaction.type === InteractionType.ModalSubmit && interaction.customId === 'keyword_modal') {
+    const prompt = interaction.fields.getTextInputValue('keyword_input').trim();
     await interaction.deferReply();
 
-    // On récupère le message d'origine pour extraire le prompt
-    const message = interaction.message;
-    const content = message.content || '';
-    const promptMatch = content.match(/\*\*(.+)\*\*/); // Cherche le texte entre ** **
-
-    if (!promptMatch) {
-      return interaction.editReply('❌ Impossible de récupérer le prompt.');
-    }
-
-    const prompt = promptMatch[1];
-
     try {
-      // Même décompte que précédemment
-      let countdown = 5;
-      await interaction.editReply(`⏳ Regénération dans ${countdown} secondes...`);
+      const images = await searchPixabayImages(prompt, 3);
+      if (images.length === 0) {
+        return interaction.editReply(`❌ Aucune image trouvée pour : **${prompt}**`);
+      }
 
-      const interval = setInterval(async () => {
-        countdown--;
-        if (countdown > 0) {
-          await interaction.editReply(`⏳ Regénération dans ${countdown} secondes...`);
-        } else {
-          clearInterval(interval);
+      const embeds = await createEmbedsFromImages(images, prompt);
+      const btn = new ButtonBuilder()
+        .setCustomId(`regenerate_${prompt}`)
+        .setLabel('🔄 Régénérer')
+        .setStyle(ButtonStyle.Secondary);
+      const row = new ActionRowBuilder().addComponents(btn);
 
-          try {
-            const imageBuffer = await generateImage(prompt);
+      await interaction.editReply({ embeds, components: [row] });
 
-            const regenButton = new ButtonBuilder()
-              .setCustomId(`regen_${Date.now()}`)
-              .setLabel('🔄 Regénérer')
-              .setStyle(ButtonStyle.Secondary);
+      // Nouveau message avec boutons
+      const channel = await client.channels.fetch(CHANNEL_ID);
+      const btnRandom = new ButtonBuilder()
+        .setCustomId('generate_random')
+        .setLabel('🎲 Générer image aléatoire')
+        .setStyle(ButtonStyle.Success);
 
-            const row = new ActionRowBuilder().addComponents(regenButton);
+      const btnKeyword = new ButtonBuilder()
+        .setCustomId('generate_keyword')
+        .setLabel('🔍 Générer par mot-clé')
+        .setStyle(ButtonStyle.Primary);
 
-            await interaction.editReply({
-              content: `🖼️ Image régénérée pour : **${prompt}**`,
-              files: [{ attachment: imageBuffer, name: 'image.png' }],
-              components: [row]
-            });
-          } catch (error) {
-            console.error(error);
-            await interaction.editReply('❌ Une erreur est survenue lors de la régénération.');
-          }
-        }
-      }, 1000);
+      const newRow = new ActionRowBuilder().addComponents(btnRandom, btnKeyword);
+
+      await channel.send({
+        content: 'Tu veux une autre image ? Choisis ci-dessous :',
+        components: [newRow]
+      });
 
     } catch (error) {
       console.error(error);
-      await interaction.editReply('❌ Une erreur est survenue.');
+      await interaction.editReply('❌ Erreur lors de la recherche d\'images.');
     }
   }
 });
