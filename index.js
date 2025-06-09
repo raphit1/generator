@@ -18,8 +18,8 @@ const TOKEN = process.env.DISCORD_TOKEN;
 const REPLICATE_TOKEN = process.env.REPLICATE_API_TOKEN;
 const CHANNEL_ID = '1381587397724340365';
 
-// Remplace ceci par l'ID exact du modèle Replicate (voir ci-dessous)
-const MODEL_VERSION = 'db21e45a8b7e6612b8c3a96ccf5e146758a52f9c7acfa3f89448f6e8bcd3e365';
+// Modèle Stable Diffusion XL sur Replicate (version officielle)
+const MODEL_VERSION = 'stability-ai/sdxl:7762fd07cf82c948538e41f63f77d685e02b063e37e496e96eefd46c929f9bdc';
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
@@ -37,6 +37,7 @@ client.once(Events.ClientReady, async () => {
       .setCustomId('open_modal')
       .setLabel('🎨 Générer une image')
       .setStyle(ButtonStyle.Primary);
+
     const row = new ActionRowBuilder().addComponents(button);
 
     await channel.send({
@@ -75,7 +76,6 @@ client.on(Events.InteractionCreate, async interaction => {
     }, 5000);
 
     try {
-      // Lancement de la génération
       const res = await fetch('https://api.replicate.com/v1/predictions', {
         method: 'POST',
         headers: {
@@ -90,10 +90,9 @@ client.on(Events.InteractionCreate, async interaction => {
 
       const prediction = await res.json();
       if (!prediction || !prediction.urls || !prediction.urls.get) {
-        throw new Error('Prediction API call failed');
+        throw new Error('Erreur lors de l’appel API.');
       }
 
-      // Attente de la génération
       let output = null;
       let status = prediction.status;
       const start = Date.now();
