@@ -1,62 +1,95 @@
-import { Client, GatewayIntentBits, Events } from 'discord.js';
-import fetch from 'node-fetch';
+import {
+  Client,
+  GatewayIntentBits,
+  ButtonBuilder,
+  ActionRowBuilder,
+  ButtonStyle,
+  Events,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  InteractionType
+} from 'discord.js';
 import dotenv from 'dotenv';
+import axios from 'axios';
 
 dotenv.config();
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const HF_TOKEN = process.env.HF_TOKEN;
-const CHANNEL_ID = '1381587397724340365';  // Ton salon Discord
+const CHANNEL_ID = '1381587397724340365';
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds, 
-    GatewayIntentBits.GuildMessages, 
-    GatewayIntentBits.MessageContent
-  ],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
 });
 
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`✅ Connecté en tant que ${client.user.tag}`);
+  const channel = await client.channels.fetch(CHANNEL_ID);
+
+  if (channel) {
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('generate_image')
+        .setLabel('🎨 Générer une image')
+        .setStyle(ButtonStyle.Primary)
+    );
+
+    await channel.send({
+      content: 'Clique sur le bouton pour générer une image :',
+      components: [row],
+    });
+  }
 });
 
-client.on(Events.MessageCreate, async (message) => {
-  if (message.channel.id !== CHANNEL_ID || message.author.bot) return;
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (interaction.channelId !== CHANNEL_ID) return;
 
-  if (message.content.startsWith('!image ')) {
-    const prompt = message.content.slice(7).trim();
-    if (!prompt) return message.channel.send('❌ Merci de fournir un texte après !image');
+  if (interaction.isButton() && interaction.customId === 'generate_image') {
+    const modal = new ModalBuilder().setCustomId('image_prompt').setTitle('Générer une image');
 
-    await message.channel.send(`🎨 Génération de l'image pour : "${prompt}" ...`);
+    const input = new TextInputBuilder()
+      .setCustomId('prompt_input')
+      .setLabel('Décris ton image')
+      .setStyle(TextInputStyle.Short)
+      .setPlaceholder('ex: chat astronaute sur la lune')
+      .setRequired(true);
+
+    const row = new ActionRowBuilder().addComponents(input);
+    modal.addComponents(row);
+
+    await interaction.showModal(modal);
+  }
+
+  if (interaction.type === InteractionType.ModalSubmit && interaction.customId === 'image_prompt') {
+    const prompt = interaction.fields.getTextInputValue('prompt_input');
+
+    await interaction.deferReply();
 
     try {
-      const response = await fetch(
+      const response = await axios.post(
         'https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-2',
         {
-          method: 'POST',
+          inputs: prompt,
+        },
+        {
           headers: {
             Authorization: `Bearer ${HF_TOKEN}`,
-            'Content-Type': 'application/json',
+            Accept: 'application/json',
           },
-          body: JSON.stringify({ inputs: prompt }),
+          responseType: 'arraybuffer',
         }
       );
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        return message.channel.send(`❌ Erreur API : ${errorText}`);
-      }
+      const buffer = Buffer.from(response.data, 'binary');
 
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-
-      await message.channel.send({
-        content: `🖼️ Image générée pour : **${prompt}**`,
+      await interaction.editReply({
+        content: `🖼️ Prompt : **${prompt}**`,
         files: [{ attachment: buffer, name: 'image.png' }],
       });
-    } catch (error) {
-      console.error(error);
-      message.channel.send('🚫 Une erreur est survenue lors de la génération.');
+    } catch (err) {
+      console.error(err?.response?.data || err);
+      interaction.editReply('🚫 Une erreur est survenue pendant la génération de l’image.');
     }
   }
 });
