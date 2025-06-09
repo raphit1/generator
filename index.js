@@ -12,7 +12,6 @@ import {
   InteractionType,
   EmbedBuilder
 } from 'discord.js';
-
 import fetch from 'node-fetch';
 
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -24,52 +23,16 @@ const client = new Client({
 });
 
 const RANDOM_BASE_KEYWORD = 'nature'; // mot clé large pour images aléatoires
-const MAX_PIXABAY_RESULTS = 200;
-
-async function fetchWithTimeout(resource, options = {}) {
-  const { timeout = 5000 } = options;
-
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-
-  try {
-    const response = await fetch(resource, {
-      ...options,
-      signal: controller.signal  
-    });
-    clearTimeout(id);
-    return response;
-  } catch (error) {
-    clearTimeout(id);
-    throw error;
-  }
-}
+const MAX_PIXABAY_RESULTS = 200; // max Pixabay accessible par requête
 
 async function searchPixabayImages(query, per_page = 3, offset = 0) {
-  try {
-    const page = Math.floor(offset / per_page) + 1;
-    const url = `https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(query)}&image_type=photo&per_page=${per_page}&page=${page}`;
-    console.log("Appel Pixabay URL:", url);
-
-    const res = await fetchWithTimeout(url, { timeout: 7000 });
-    console.log("Status Pixabay:", res.status);
-
-    if (!res.ok) throw new Error(`Pixabay API error: ${res.status}`);
-
-    const data = await res.json();
-    console.log("Pixabay data hits:", data.hits.length);
-    return data.hits || [];
-  } catch(e) {
-    console.error("Erreur fetch Pixabay:", e);
-    return [];
-  }
-}
-
-function shuffleArray(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
+  // Pixabay ne supporte pas offset, on utilise page calculé depuis offset
+  const page = Math.floor(offset / per_page) + 1;
+  const url = `https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(query)}&image_type=photo&per_page=${per_page}&page=${page}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Pixabay API error: ${res.status}`);
+  const data = await res.json();
+  return data.hits || [];
 }
 
 function getRandomOffset(maxResults, per_page) {
@@ -78,25 +41,16 @@ function getRandomOffset(maxResults, per_page) {
 }
 
 async function getRandomImages(per_page = 3) {
-  try {
-    // Première requête pour connaître totalHits
-    const urlTotal = `https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(RANDOM_BASE_KEYWORD)}&image_type=photo&per_page=3&page=1`;
-    console.log("Appel Pixabay totalHits URL:", urlTotal);
+  // Obtenir totalHits max 200 (limite Pixabay)
+  const urlTotal = `https://pixabay.com/api/?key=${PIXABAY_API_KEY}&q=${encodeURIComponent(RANDOM_BASE_KEYWORD)}&image_type=photo&per_page=3&page=1`;
+  const resTotal = await fetch(urlTotal);
+  if (!resTotal.ok) throw new Error(`Pixabay API error: ${resTotal.status}`);
+  const dataTotal = await resTotal.json();
+  const totalHits = Math.min(dataTotal.totalHits, MAX_PIXABAY_RESULTS);
 
-    const resTotal = await fetchWithTimeout(urlTotal, { timeout: 7000 });
-    if (!resTotal.ok) throw new Error(`Pixabay API error: ${resTotal.status}`);
-    const dataTotal = await resTotal.json();
-    const totalHits = Math.min(dataTotal.totalHits, MAX_PIXABAY_RESULTS);
-
-    const offset = getRandomOffset(totalHits, per_page);
-    console.log(`totalHits: ${totalHits}, offset choisi: ${offset}`);
-
-    const images = await searchPixabayImages(RANDOM_BASE_KEYWORD, per_page, offset);
-    return images;
-  } catch(e) {
-    console.error("Erreur getRandomImages:", e);
-    return [];
-  }
+  const offset = getRandomOffset(totalHits, per_page);
+  const images = await searchPixabayImages(RANDOM_BASE_KEYWORD, per_page, offset);
+  return images;
 }
 
 async function createEmbedsFromImages(images, prompt) {
@@ -104,36 +58,31 @@ async function createEmbedsFromImages(images, prompt) {
     .setTitle(`Image pour : ${prompt}`)
     .setURL(img.pageURL)
     .setImage(img.largeImageURL)
-    .setFooter({ text: `Photographe: ${img.user}` }));
+    .setFooter({ text: `Photographe : ${img.user}` }));
 }
 
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Connecté en tant que ${client.user.tag}`);
 
-  try {
-    const channel = await client.channels.fetch(CHANNEL_ID);
-    if (!channel) return console.error('Salon introuvable');
+  const channel = await client.channels.fetch(CHANNEL_ID);
+  if (!channel) return console.error('Salon introuvable');
 
-    const btnRandom = new ButtonBuilder()
-      .setCustomId('generate_random')
-      .setLabel('🎲 Générer image aléatoire')
-      .setStyle(ButtonStyle.Success);
+  const btnRandom = new ButtonBuilder()
+    .setCustomId('generate_random')
+    .setLabel('🎲 Générer image aléatoire')
+    .setStyle(ButtonStyle.Success);
 
-    const btnKeyword = new ButtonBuilder()
-      .setCustomId('generate_keyword')
-      .setLabel('🔍 Générer par mot-clé')
-      .setStyle(ButtonStyle.Primary);
+  const btnKeyword = new ButtonBuilder()
+    .setCustomId('generate_keyword')
+    .setLabel('🔍 Générer par mot-clé')
+    .setStyle(ButtonStyle.Primary);
 
-    const row = new ActionRowBuilder().addComponents(btnRandom, btnKeyword);
+  const row = new ActionRowBuilder().addComponents(btnRandom, btnKeyword);
 
-    await channel.send({
-      content: 'Choisis une option pour générer des images :',
-      components: [row]
-    });
-
-  } catch(e) {
-    console.error("Erreur au démarrage :", e);
-  }
+  await channel.send({
+    content: 'Choisis une option pour générer des images :',
+    components: [row]
+  });
 });
 
 client.on(Events.InteractionCreate, async interaction => {
@@ -156,7 +105,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
         await interaction.editReply({ embeds, components: [row] });
 
-        // Nouveau message avec boutons
+        // Nouveau message avec boutons de génération
         const channel = await client.channels.fetch(CHANNEL_ID);
         const btnRandom = new ButtonBuilder()
           .setCustomId('generate_random')
@@ -182,6 +131,7 @@ client.on(Events.InteractionCreate, async interaction => {
     }
 
     if (interaction.customId === 'generate_keyword') {
+      // Ouvre modal pour mot-clé
       const modal = new ModalBuilder()
         .setCustomId('keyword_modal')
         .setTitle('Générer image par mot-clé');
@@ -205,6 +155,7 @@ client.on(Events.InteractionCreate, async interaction => {
 
       try {
         if (suffix === 'random') {
+          // Régénérer aléatoire
           const images = await getRandomImages(3);
           if (images.length === 0) {
             return interaction.followUp({ content: '❌ Pas d\'images aléatoires trouvées.', ephemeral: true });
@@ -219,6 +170,7 @@ client.on(Events.InteractionCreate, async interaction => {
           await interaction.message.edit({ embeds, components: [row] });
 
         } else {
+          // Régénérer avec mot-clé (suffix = mot-clé)
           const prompt = suffix;
           const images = await searchPixabayImages(prompt, 3);
           if (images.length === 0) {
@@ -227,7 +179,7 @@ client.on(Events.InteractionCreate, async interaction => {
           const embeds = await createEmbedsFromImages(images, prompt);
           const btn = new ButtonBuilder()
             .setCustomId(`regenerate_${prompt}`)
-            .setLabel('🔄 Régénérer`)
+            .setLabel('🔄 Régénérer')
             .setStyle(ButtonStyle.Secondary);
           const row = new ActionRowBuilder().addComponents(btn);
 
