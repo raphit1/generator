@@ -93,6 +93,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const { customId } = interaction;
 
     if (customId === 'custom_search') {
+      // **Appel showModal immédiatement, sans deferReply avant**
       const modal = new ModalBuilder()
         .setCustomId('custom_keyword_modal')
         .setTitle('Recherche personnalisée');
@@ -108,7 +109,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       modal.addComponents(inputRow);
 
       await interaction.showModal(modal);
-      return; // ← super important pour ne rien faire après l'ouverture du modal !
+      return; // très important pour ne pas continuer après showModal
     }
 
     if (
@@ -117,6 +118,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       customId.startsWith('regen_')
     ) {
       await interaction.deferReply();
+
       let keyword;
 
       if (customId.startsWith('keyword_')) {
@@ -193,7 +195,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 client.login(TOKEN);
 
-// Fonction utilitaire : divise un tableau en sous-groupes
 function chunk(arr, size) {
   const result = [];
   for (let i = 0; i < arr.length; i += size) {
