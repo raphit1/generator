@@ -13,6 +13,7 @@ import {
 } from 'discord.js';
 import fetch from 'node-fetch';
 
+// ⚙️ Variables d'environnement
 const TOKEN = process.env.DISCORD_TOKEN;
 const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY;
 const CHANNEL_ID = process.env.CHANNEL_ID;
@@ -28,6 +29,7 @@ const client = new Client({
 
 const keywords = ['nature', 'city', 'animal', 'mountain', 'ocean', 'travel'];
 
+// 🔁 Divise les boutons par groupe de 5
 function chunk(arr, size) {
   const result = [];
   for (let i = 0; i < arr.length; i += size) {
@@ -36,6 +38,7 @@ function chunk(arr, size) {
   return result;
 }
 
+// 📷 Récupération d’images aléatoires
 async function fetchRandomImages(keyword) {
   const finalKeyword = keyword || keywords[Math.floor(Math.random() * keywords.length)];
   const url = `https://api.unsplash.com/search/photos?query=${finalKeyword}&per_page=30&client_id=${UNSPLASH_ACCESS_KEY}`;
@@ -49,7 +52,7 @@ async function fetchRandomImages(keyword) {
   const data = await res.json();
   if (!data.results || data.results.length === 0) return { images: [], keyword: finalKeyword };
 
-  // Shuffle
+  // Mélange
   for (let i = data.results.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [data.results[i], data.results[j]] = [data.results[j], data.results[i]];
@@ -58,6 +61,7 @@ async function fetchRandomImages(keyword) {
   return { images: data.results.slice(0, 3), keyword: finalKeyword };
 }
 
+// 🎛️ Génère tous les boutons initiaux
 function getInteractionRows() {
   const randomButton = new ButtonBuilder()
     .setCustomId('random_image')
@@ -84,12 +88,13 @@ function getInteractionRows() {
   return rows;
 }
 
+// 🔌 Connexion
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Connecté en tant que ${client.user.tag}`);
 
   try {
     const channel = await client.channels.fetch(CHANNEL_ID);
-    if (!channel || !channel.isTextBased()) throw new Error('Salon introuvable ou non textuel');
+    if (!channel?.isTextBased()) throw new Error('Salon introuvable ou non textuel');
 
     await channel.send({
       content: '📸 Choisis un mot-clé ou tape le tien pour générer des images depuis Unsplash !',
@@ -100,12 +105,13 @@ client.once(Events.ClientReady, async () => {
   }
 });
 
+// 🎯 Interaction handler
 client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isButton()) {
     const { customId } = interaction;
 
+    // 🔍 Bouton "Rechercher par mot-clé"
     if (customId === 'custom_search') {
-      // ✅ Ne RIEN faire avant showModal
       const modal = new ModalBuilder()
         .setCustomId('custom_keyword_modal')
         .setTitle('Recherche personnalisée');
@@ -122,6 +128,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
+    // 🔁 Boutons de génération ou régénération
     if (
       customId === 'random_image' ||
       customId.startsWith('keyword_') ||
@@ -156,12 +163,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setLabel('🔁 Reproposer')
           .setStyle(ButtonStyle.Secondary);
 
-        const regenRow = new ActionRowBuilder().addComponents(regenButton, backButton);
+        const row = new ActionRowBuilder().addComponents(regenButton, backButton);
 
         await interaction.editReply({
           content: `Résultats pour : **${usedKeyword}**`,
           embeds,
-          components: [regenRow],
+          components: [row],
         });
       } catch (e) {
         console.error('Erreur lors de la génération :', e);
@@ -169,15 +176,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
+    // 🔁 Revenir au menu
     if (customId === 'back_to_menu') {
-      await interaction.deferReply({ ephemeral: true });
-      await interaction.editReply({
+      await interaction.reply({
         content: '📸 Choisis un mot-clé ou tape le tien pour générer des images depuis Unsplash !',
         components: getInteractionRows(),
+        ephemeral: true,
       });
     }
   }
 
+  // 📩 Résultat du modal
   if (interaction.isModalSubmit() && interaction.customId === 'custom_keyword_modal') {
     await interaction.deferReply();
     const userInput = interaction.fields.getTextInputValue('custom_keyword_input');
@@ -204,12 +213,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setLabel('🔁 Reproposer')
         .setStyle(ButtonStyle.Secondary);
 
-      const regenRow = new ActionRowBuilder().addComponents(regenButton, backButton);
+      const row = new ActionRowBuilder().addComponents(regenButton, backButton);
 
       await interaction.editReply({
         content: `Résultats pour : **${usedKeyword}**`,
         embeds,
-        components: [regenRow],
+        components: [row],
       });
     } catch (e) {
       console.error('Erreur dans la recherche personnalisée :', e);
@@ -218,7 +227,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-// Gestionnaire d'erreurs global
+// 🔒 Sécurité & logs
 client.on('error', console.error);
 process.on('unhandledRejection', (reason) => {
   console.error('❌ Rejection non gérée :', reason);
