@@ -107,7 +107,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const inputRow = new ActionRowBuilder().addComponents(input);
       modal.addComponents(inputRow);
 
-      return interaction.showModal(modal);
+      await interaction.showModal(modal);
+      return; // ← super important pour ne rien faire après l'ouverture du modal !
     }
 
     if (
