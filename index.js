@@ -7,6 +7,9 @@ import {
   ActionRowBuilder,
   Events,
   EmbedBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
 } from 'discord.js';
 import fetch from 'node-fetch';
 
@@ -54,26 +57,30 @@ client.once(Events.ClientReady, async () => {
     const channel = await client.channels.fetch(CHANNEL_ID);
     if (!channel || !channel.isTextBased()) throw new Error('Salon introuvable ou non textuel');
 
-    // Créer les boutons de mots-clés
-    const buttons = keywords.map(k =>
+    const randomButton = new ButtonBuilder()
+      .setCustomId('random_image')
+      .setLabel('🎲 Aléatoire')
+      .setStyle(ButtonStyle.Primary);
+
+    const customSearchButton = new ButtonBuilder()
+      .setCustomId('custom_search')
+      .setLabel('🔍 Rechercher par mot-clé')
+      .setStyle(ButtonStyle.Primary);
+
+    const keywordButtons = keywords.map(k =>
       new ButtonBuilder()
         .setCustomId(`keyword_${k}`)
         .setLabel(k.charAt(0).toUpperCase() + k.slice(1))
         .setStyle(ButtonStyle.Secondary)
     );
 
-    const randomButton = new ButtonBuilder()
-      .setCustomId('random_image')
-      .setLabel('🎲 Aléatoire')
-      .setStyle(ButtonStyle.Primary);
-
     const rows = [
-      new ActionRowBuilder().addComponents(randomButton),
-      ...chunk(buttons, 5).map(group => new ActionRowBuilder().addComponents(...group)),
+      new ActionRowBuilder().addComponents(randomButton, customSearchButton),
+      ...chunk(keywordButtons, 5).map(group => new ActionRowBuilder().addComponents(...group)),
     ];
 
     await channel.send({
-      content: '📸 Choisis un mot-clé ou clique sur "Aléatoire" pour générer des images Unsplash !',
+      content: '📸 Choisis un mot-clé ou tape le tien pour générer des images depuis Unsplash !',
       components: rows,
     });
   } catch (e) {
@@ -82,57 +89,110 @@ client.once(Events.ClientReady, async () => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isButton()) return;
+  if (interaction.isButton()) {
+    const { customId } = interaction;
 
-  const { customId } = interaction;
-  await interaction.deferReply();
+    if (customId === 'custom_search') {
+      const modal = new ModalBuilder()
+        .setCustomId('custom_keyword_modal')
+        .setTitle('Recherche personnalisée');
 
-  try {
-    let keyword;
+      const input = new TextInputBuilder()
+        .setCustomId('custom_keyword_input')
+        .setLabel('Quel mot-clé veux-tu rechercher ?')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('Ex: space, flowers, architecture')
+        .setRequired(true);
 
-    if (customId.startsWith('keyword_')) {
-      keyword = customId.split('_')[1];
-    } else if (customId === 'random_image') {
-      keyword = undefined;
-    } else if (customId.startsWith('regen_')) {
-      keyword = customId.split('_')[1] || undefined;
-    } else {
-      return;
+      const inputRow = new ActionRowBuilder().addComponents(input);
+      modal.addComponents(inputRow);
+
+      return interaction.showModal(modal);
     }
 
-    const { images, keyword: usedKeyword } = await fetchRandomImages(keyword);
-    if (images.length === 0) return interaction.editReply('❌ Aucune image trouvée.');
+    if (
+      customId === 'random_image' ||
+      customId.startsWith('keyword_') ||
+      customId.startsWith('regen_')
+    ) {
+      await interaction.deferReply();
+      let keyword;
 
-    const embeds = images.map(img =>
-      new EmbedBuilder()
-        .setTitle('Image aléatoire Unsplash')
-        .setURL(img.links.html)
-        .setImage(img.urls.regular)
-        .setFooter({ text: `Photographe : ${img.user.name}` })
-    );
+      if (customId.startsWith('keyword_')) {
+        keyword = customId.split('_')[1];
+      } else if (customId.startsWith('regen_')) {
+        keyword = customId.split('_')[1];
+      }
 
-    const regenButton = new ButtonBuilder()
-      .setCustomId(`regen_${usedKeyword}`)
-      .setLabel('🔄 Régénérer')
-      .setStyle(ButtonStyle.Success);
+      try {
+        const { images, keyword: usedKeyword } = await fetchRandomImages(keyword);
+        if (images.length === 0) return interaction.editReply('❌ Aucune image trouvée.');
 
-    const regenRow = new ActionRowBuilder().addComponents(regenButton);
+        const embeds = images.map(img =>
+          new EmbedBuilder()
+            .setTitle('Image Unsplash')
+            .setURL(img.links.html)
+            .setImage(img.urls.regular)
+            .setFooter({ text: `Photographe : ${img.user.name}` })
+        );
 
-    await interaction.editReply({
-      content: `Résultats pour le mot-clé : **${usedKeyword}**`,
-      embeds,
-      components: [regenRow],
-    });
+        const regenButton = new ButtonBuilder()
+          .setCustomId(`regen_${usedKeyword}`)
+          .setLabel('🔄 Régénérer')
+          .setStyle(ButtonStyle.Success);
 
-  } catch (e) {
-    console.error('Erreur lors de la génération :', e);
-    await interaction.editReply('❌ Une erreur est survenue.');
+        const regenRow = new ActionRowBuilder().addComponents(regenButton);
+
+        await interaction.editReply({
+          content: `Résultats pour : **${usedKeyword}**`,
+          embeds,
+          components: [regenRow],
+        });
+      } catch (e) {
+        console.error('Erreur lors de la génération :', e);
+        await interaction.editReply('❌ Une erreur est survenue.');
+      }
+    }
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId === 'custom_keyword_modal') {
+    await interaction.deferReply();
+    const userInput = interaction.fields.getTextInputValue('custom_keyword_input');
+
+    try {
+      const { images, keyword: usedKeyword } = await fetchRandomImages(userInput);
+      if (images.length === 0) return interaction.editReply('❌ Aucune image trouvée.');
+
+      const embeds = images.map(img =>
+        new EmbedBuilder()
+          .setTitle('Image personnalisée Unsplash')
+          .setURL(img.links.html)
+          .setImage(img.urls.regular)
+          .setFooter({ text: `Photographe : ${img.user.name}` })
+      );
+
+      const regenButton = new ButtonBuilder()
+        .setCustomId(`regen_${usedKeyword}`)
+        .setLabel('🔄 Régénérer')
+        .setStyle(ButtonStyle.Success);
+
+      const regenRow = new ActionRowBuilder().addComponents(regenButton);
+
+      await interaction.editReply({
+        content: `Résultats pour : **${usedKeyword}**`,
+        embeds,
+        components: [regenRow],
+      });
+    } catch (e) {
+      console.error('Erreur dans la recherche personnalisée :', e);
+      await interaction.editReply('❌ Une erreur est survenue.');
+    }
   }
 });
 
 client.login(TOKEN);
 
-// Fonction utilitaire : divise un tableau en sous-groupes de `size`
+// Fonction utilitaire : divise un tableau en sous-groupes
 function chunk(arr, size) {
   const result = [];
   for (let i = 0; i < arr.length; i += size) {
