@@ -25,7 +25,7 @@ const client = new Client({
 
 const keywords = ['nature', 'city', 'animal', 'mountain', 'ocean', 'travel'];
 
-async function fetchRandomImages(keyword?: string) {
+async function fetchRandomImages(keyword) {
   const finalKeyword = keyword || keywords[Math.floor(Math.random() * keywords.length)];
   const url = `https://api.unsplash.com/search/photos?query=${finalKeyword}&per_page=30&client_id=${UNSPLASH_ACCESS_KEY}`;
 
@@ -54,7 +54,7 @@ client.once(Events.ClientReady, async () => {
     const channel = await client.channels.fetch(CHANNEL_ID);
     if (!channel || !channel.isTextBased()) throw new Error('Salon introuvable ou non textuel');
 
-    // Créer tous les boutons
+    // Créer les boutons de mots-clés
     const buttons = keywords.map(k =>
       new ButtonBuilder()
         .setCustomId(`keyword_${k}`)
@@ -68,12 +68,12 @@ client.once(Events.ClientReady, async () => {
       .setStyle(ButtonStyle.Primary);
 
     const rows = [
-      new ActionRowBuilder<ButtonBuilder>().addComponents(randomButton),
-      ...chunk(buttons, 5).map(group => new ActionRowBuilder<ButtonBuilder>().addComponents(...group)),
+      new ActionRowBuilder().addComponents(randomButton),
+      ...chunk(buttons, 5).map(group => new ActionRowBuilder().addComponents(...group)),
     ];
 
     await channel.send({
-      content: '📸 Choisis un mot-clé ou clique sur aléatoire pour générer des images Unsplash !',
+      content: '📸 Choisis un mot-clé ou clique sur "Aléatoire" pour générer des images Unsplash !',
       components: rows,
     });
   } catch (e) {
@@ -81,7 +81,6 @@ client.once(Events.ClientReady, async () => {
   }
 });
 
-// Gestion des interactions
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isButton()) return;
 
@@ -89,7 +88,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   await interaction.deferReply();
 
   try {
-    let keyword: string | undefined;
+    let keyword;
 
     if (customId.startsWith('keyword_')) {
       keyword = customId.split('_')[1];
@@ -117,7 +116,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       .setLabel('🔄 Régénérer')
       .setStyle(ButtonStyle.Success);
 
-    const regenRow = new ActionRowBuilder<ButtonBuilder>().addComponents(regenButton);
+    const regenRow = new ActionRowBuilder().addComponents(regenButton);
 
     await interaction.editReply({
       content: `Résultats pour le mot-clé : **${usedKeyword}**`,
@@ -133,10 +132,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 client.login(TOKEN);
 
-// 🧩 Fonction utilitaire pour grouper les boutons (car Discord limite à 5 par rangée)
-function chunk<T>(arr: T[], size: number): T[][] {
-  return arr.reduce((acc, _, i) => {
-    if (i % size === 0) acc.push(arr.slice(i, i + size));
-    return acc;
-  }, [] as T[][]);
+// Fonction utilitaire : divise un tableau en sous-groupes de `size`
+function chunk(arr, size) {
+  const result = [];
+  for (let i = 0; i < arr.length; i += size) {
+    result.push(arr.slice(i, i + size));
+  }
+  return result;
 }
