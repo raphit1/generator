@@ -28,6 +28,14 @@ const client = new Client({
 
 const keywords = ['nature', 'city', 'animal', 'mountain', 'ocean', 'travel'];
 
+function chunk(arr, size) {
+  const result = [];
+  for (let i = 0; i < arr.length; i += size) {
+    result.push(arr.slice(i, i + size));
+  }
+  return result;
+}
+
 async function fetchRandomImages(keyword) {
   const finalKeyword = keyword || keywords[Math.floor(Math.random() * keywords.length)];
   const url = `https://api.unsplash.com/search/photos?query=${finalKeyword}&per_page=30&client_id=${UNSPLASH_ACCESS_KEY}`;
@@ -50,6 +58,32 @@ async function fetchRandomImages(keyword) {
   return { images: data.results.slice(0, 3), keyword: finalKeyword };
 }
 
+function getInteractionRows() {
+  const randomButton = new ButtonBuilder()
+    .setCustomId('random_image')
+    .setLabel('🎲 Aléatoire')
+    .setStyle(ButtonStyle.Primary);
+
+  const customSearchButton = new ButtonBuilder()
+    .setCustomId('custom_search')
+    .setLabel('🔍 Rechercher par mot-clé')
+    .setStyle(ButtonStyle.Primary);
+
+  const keywordButtons = keywords.map(k =>
+    new ButtonBuilder()
+      .setCustomId(`keyword_${k}`)
+      .setLabel(k.charAt(0).toUpperCase() + k.slice(1))
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  const rows = [
+    new ActionRowBuilder().addComponents(randomButton, customSearchButton),
+    ...chunk(keywordButtons, 5).map(group => new ActionRowBuilder().addComponents(...group)),
+  ];
+
+  return rows;
+}
+
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Connecté en tant que ${client.user.tag}`);
 
@@ -57,31 +91,9 @@ client.once(Events.ClientReady, async () => {
     const channel = await client.channels.fetch(CHANNEL_ID);
     if (!channel || !channel.isTextBased()) throw new Error('Salon introuvable ou non textuel');
 
-    const randomButton = new ButtonBuilder()
-      .setCustomId('random_image')
-      .setLabel('🎲 Aléatoire')
-      .setStyle(ButtonStyle.Primary);
-
-    const customSearchButton = new ButtonBuilder()
-      .setCustomId('custom_search')
-      .setLabel('🔍 Rechercher par mot-clé')
-      .setStyle(ButtonStyle.Primary);
-
-    const keywordButtons = keywords.map(k =>
-      new ButtonBuilder()
-        .setCustomId(`keyword_${k}`)
-        .setLabel(k.charAt(0).toUpperCase() + k.slice(1))
-        .setStyle(ButtonStyle.Secondary)
-    );
-
-    const rows = [
-      new ActionRowBuilder().addComponents(randomButton, customSearchButton),
-      ...chunk(keywordButtons, 5).map(group => new ActionRowBuilder().addComponents(...group)),
-    ];
-
     await channel.send({
       content: '📸 Choisis un mot-clé ou tape le tien pour générer des images depuis Unsplash !',
-      components: rows,
+      components: getInteractionRows(),
     });
   } catch (e) {
     console.error('Erreur au démarrage:', e);
@@ -93,6 +105,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const { customId } = interaction;
 
     if (customId === 'custom_search') {
+      // ✅ Ne RIEN faire avant showModal
       const modal = new ModalBuilder()
         .setCustomId('custom_keyword_modal')
         .setTitle('Recherche personnalisée');
@@ -104,9 +117,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setPlaceholder('Ex: space, flowers, architecture')
         .setRequired(true);
 
-      const inputRow = new ActionRowBuilder().addComponents(input);
-      modal.addComponents(inputRow);
-
+      modal.addComponents(new ActionRowBuilder().addComponents(input));
       await interaction.showModal(modal);
       return;
     }
@@ -119,10 +130,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await interaction.deferReply();
 
       let keyword;
-
-      if (customId.startsWith('keyword_')) {
-        keyword = customId.split('_')[1];
-      } else if (customId.startsWith('regen_')) {
+      if (customId.startsWith('keyword_') || customId.startsWith('regen_')) {
         keyword = customId.split('_')[1];
       }
 
@@ -143,25 +151,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
           .setLabel('🔄 Régénérer')
           .setStyle(ButtonStyle.Success);
 
-        const regenRow = new ActionRowBuilder().addComponents(regenButton);
+        const backButton = new ButtonBuilder()
+          .setCustomId('back_to_menu')
+          .setLabel('🔁 Reproposer')
+          .setStyle(ButtonStyle.Secondary);
+
+        const regenRow = new ActionRowBuilder().addComponents(regenButton, backButton);
 
         await interaction.editReply({
           content: `Résultats pour : **${usedKeyword}**`,
           embeds,
           components: [regenRow],
-        });
-
-        const moreButton = new ButtonBuilder()
-          .setCustomId('more_options')
-          .setLabel('➕ Générer autre chose')
-          .setStyle(ButtonStyle.Secondary);
-
-        const moreRow = new ActionRowBuilder().addComponents(moreButton);
-
-        await interaction.followUp({
-          content: 'Envie d\'en générer une autre ou de chercher autre chose ?',
-          components: [moreRow],
-          ephemeral: true,
         });
       } catch (e) {
         console.error('Erreur lors de la génération :', e);
@@ -169,33 +169,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    else if (customId === 'more_options') {
-      const randomButton = new ButtonBuilder()
-        .setCustomId('random_image')
-        .setLabel('🎲 Aléatoire')
-        .setStyle(ButtonStyle.Primary);
-
-      const customSearchButton = new ButtonBuilder()
-        .setCustomId('custom_search')
-        .setLabel('🔍 Rechercher par mot-clé')
-        .setStyle(ButtonStyle.Primary);
-
-      const keywordButtons = keywords.map(k =>
-        new ButtonBuilder()
-          .setCustomId(`keyword_${k}`)
-          .setLabel(k.charAt(0).toUpperCase() + k.slice(1))
-          .setStyle(ButtonStyle.Secondary)
-      );
-
-      const rows = [
-        new ActionRowBuilder().addComponents(randomButton, customSearchButton),
-        ...chunk(keywordButtons, 5).map(group => new ActionRowBuilder().addComponents(...group)),
-      ];
-
-      await interaction.reply({
-        content: '📸 Choisis une nouvelle option pour générer des images :',
-        components: rows,
-        ephemeral: true,
+    if (customId === 'back_to_menu') {
+      await interaction.deferReply({ ephemeral: true });
+      await interaction.editReply({
+        content: '📸 Choisis un mot-clé ou tape le tien pour générer des images depuis Unsplash !',
+        components: getInteractionRows(),
       });
     }
   }
@@ -221,25 +199,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .setLabel('🔄 Régénérer')
         .setStyle(ButtonStyle.Success);
 
-      const regenRow = new ActionRowBuilder().addComponents(regenButton);
+      const backButton = new ButtonBuilder()
+        .setCustomId('back_to_menu')
+        .setLabel('🔁 Reproposer')
+        .setStyle(ButtonStyle.Secondary);
+
+      const regenRow = new ActionRowBuilder().addComponents(regenButton, backButton);
 
       await interaction.editReply({
         content: `Résultats pour : **${usedKeyword}**`,
         embeds,
         components: [regenRow],
-      });
-
-      const moreButton = new ButtonBuilder()
-        .setCustomId('more_options')
-        .setLabel('➕ Générer autre chose')
-        .setStyle(ButtonStyle.Secondary);
-
-      const moreRow = new ActionRowBuilder().addComponents(moreButton);
-
-      await interaction.followUp({
-        content: 'Envie d\'en générer une autre ou de chercher autre chose ?',
-        components: [moreRow],
-        ephemeral: true,
       });
     } catch (e) {
       console.error('Erreur dans la recherche personnalisée :', e);
@@ -248,12 +218,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-client.login(TOKEN);
+// Gestionnaire d'erreurs global
+client.on('error', console.error);
+process.on('unhandledRejection', (reason) => {
+  console.error('❌ Rejection non gérée :', reason);
+});
 
-function chunk(arr, size) {
-  const result = [];
-  for (let i = 0; i < arr.length; i += size) {
-    result.push(arr.slice(i, i + size));
-  }
-  return result;
-}
+client.login(TOKEN);
