@@ -93,7 +93,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const { customId } = interaction;
 
     if (customId === 'custom_search') {
-      // **Appel showModal immédiatement, sans deferReply avant**
       const modal = new ModalBuilder()
         .setCustomId('custom_keyword_modal')
         .setTitle('Recherche personnalisée');
@@ -109,7 +108,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       modal.addComponents(inputRow);
 
       await interaction.showModal(modal);
-      return; // très important pour ne pas continuer après showModal
+      return;
     }
 
     if (
@@ -151,10 +150,53 @@ client.on(Events.InteractionCreate, async (interaction) => {
           embeds,
           components: [regenRow],
         });
+
+        const moreButton = new ButtonBuilder()
+          .setCustomId('more_options')
+          .setLabel('➕ Générer autre chose')
+          .setStyle(ButtonStyle.Secondary);
+
+        const moreRow = new ActionRowBuilder().addComponents(moreButton);
+
+        await interaction.followUp({
+          content: 'Envie d\'en générer une autre ou de chercher autre chose ?',
+          components: [moreRow],
+          ephemeral: true,
+        });
       } catch (e) {
         console.error('Erreur lors de la génération :', e);
         await interaction.editReply('❌ Une erreur est survenue.');
       }
+    }
+
+    else if (customId === 'more_options') {
+      const randomButton = new ButtonBuilder()
+        .setCustomId('random_image')
+        .setLabel('🎲 Aléatoire')
+        .setStyle(ButtonStyle.Primary);
+
+      const customSearchButton = new ButtonBuilder()
+        .setCustomId('custom_search')
+        .setLabel('🔍 Rechercher par mot-clé')
+        .setStyle(ButtonStyle.Primary);
+
+      const keywordButtons = keywords.map(k =>
+        new ButtonBuilder()
+          .setCustomId(`keyword_${k}`)
+          .setLabel(k.charAt(0).toUpperCase() + k.slice(1))
+          .setStyle(ButtonStyle.Secondary)
+      );
+
+      const rows = [
+        new ActionRowBuilder().addComponents(randomButton, customSearchButton),
+        ...chunk(keywordButtons, 5).map(group => new ActionRowBuilder().addComponents(...group)),
+      ];
+
+      await interaction.reply({
+        content: '📸 Choisis une nouvelle option pour générer des images :',
+        components: rows,
+        ephemeral: true,
+      });
     }
   }
 
@@ -185,6 +227,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
         content: `Résultats pour : **${usedKeyword}**`,
         embeds,
         components: [regenRow],
+      });
+
+      const moreButton = new ButtonBuilder()
+        .setCustomId('more_options')
+        .setLabel('➕ Générer autre chose')
+        .setStyle(ButtonStyle.Secondary);
+
+      const moreRow = new ActionRowBuilder().addComponents(moreButton);
+
+      await interaction.followUp({
+        content: 'Envie d\'en générer une autre ou de chercher autre chose ?',
+        components: [moreRow],
+        ephemeral: true,
       });
     } catch (e) {
       console.error('Erreur dans la recherche personnalisée :', e);
