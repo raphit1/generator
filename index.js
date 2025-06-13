@@ -20,16 +20,22 @@ const CHANNEL_ID = process.env.CHANNEL_ID;
 
 if (!TOKEN || !UNSPLASH_ACCESS_KEY || !CHANNEL_ID) {
   console.error('❌ Variables d\'environnement manquantes !');
+  console.log({ TOKEN, UNSPLASH_ACCESS_KEY, CHANNEL_ID }); // Pour debug
   process.exit(1);
 }
 
+// 📡 Client avec les intents nécessaires
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
 });
 
 const keywords = ['nature', 'city', 'animal', 'mountain', 'ocean', 'travel'];
 
-// 🔁 Divise les boutons par groupe de 5
+// 🔁 Découpe les boutons en groupes de 5
 function chunk(arr, size) {
   const result = [];
   for (let i = 0; i < arr.length; i += size) {
@@ -38,14 +44,32 @@ function chunk(arr, size) {
   return result;
 }
 
-// 📷 Récupération d’images aléatoires
+// ⏱️ Fetch avec timeout
+async function fetchWithTimeout(resource, options = {}) {
+  const { timeout = 5000 } = options;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(resource, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    return response;
+  } catch (e) {
+    console.error('⛔ Timeout ou fetch échoué :', e);
+    throw e;
+  }
+}
+
+// 📷 Récupère des images aléatoires
 async function fetchRandomImages(keyword) {
   const finalKeyword = keyword || keywords[Math.floor(Math.random() * keywords.length)];
   const url = `https://api.unsplash.com/search/photos?query=${finalKeyword}&per_page=30&client_id=${UNSPLASH_ACCESS_KEY}`;
 
-  const res = await fetch(url);
+  const res = await fetchWithTimeout(url);
   if (!res.ok) {
-    console.error('Erreur API Unsplash:', res.status);
+    console.error('❌ Erreur API Unsplash:', res.status);
     return { images: [], keyword: finalKeyword };
   }
 
@@ -94,56 +118,59 @@ client.once(Events.ClientReady, async () => {
 
   try {
     const channel = await client.channels.fetch(CHANNEL_ID);
-    if (!channel?.isTextBased()) throw new Error('Salon introuvable ou non textuel');
+    if (!channel?.isTextBased()) throw new Error('❌ Salon introuvable ou non textuel');
 
     await channel.send({
       content: '📸 Choisis un mot-clé ou tape le tien pour générer des images depuis Unsplash !',
       components: getInteractionRows(),
     });
   } catch (e) {
-    console.error('Erreur au démarrage:', e);
+    console.error('❌ Erreur au démarrage:', e);
   }
 });
 
-// 🎯 Interaction handler
+// 🎯 Gestion des interactions
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (interaction.isButton()) {
-    const { customId } = interaction;
+  try {
+    if (interaction.isButton()) {
+      const { customId } = interaction;
 
-    // 🔍 Bouton "Rechercher par mot-clé"
-    if (customId === 'custom_search') {
-      const modal = new ModalBuilder()
-        .setCustomId('custom_keyword_modal')
-        .setTitle('Recherche personnalisée');
+      // 🔍 Recherche personnalisée
+      if (customId === 'custom_search') {
+        const modal = new ModalBuilder()
+          .setCustomId('custom_keyword_modal')
+          .setTitle('Recherche personnalisée');
 
-      const input = new TextInputBuilder()
-        .setCustomId('custom_keyword_input')
-        .setLabel('Quel mot-clé veux-tu rechercher ?')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('Ex: space, flowers, architecture')
-        .setRequired(true);
+        const input = new TextInputBuilder()
+          .setCustomId('custom_keyword_input')
+          .setLabel('Quel mot-clé veux-tu rechercher ?')
+          .setStyle(TextInputStyle.Short)
+          .setPlaceholder('Ex: space, flowers, architecture')
+          .setRequired(true);
 
-      modal.addComponents(new ActionRowBuilder().addComponents(input));
-      await interaction.showModal(modal);
-      return;
-    }
-
-    // 🔁 Boutons de génération ou régénération
-    if (
-      customId === 'random_image' ||
-      customId.startsWith('keyword_') ||
-      customId.startsWith('regen_')
-    ) {
-      await interaction.deferReply();
-
-      let keyword;
-      if (customId.startsWith('keyword_') || customId.startsWith('regen_')) {
-        keyword = customId.split('_')[1];
+        modal.addComponents(new ActionRowBuilder().addComponents(input));
+        await interaction.showModal(modal);
+        return;
       }
 
-      try {
+      // 🔁 Aléatoire ou régénération
+      if (
+        customId === 'random_image' ||
+        customId.startsWith('keyword_') ||
+        customId.startsWith('regen_')
+      ) {
+        await interaction.deferReply();
+
+        let keyword;
+        if (customId.startsWith('keyword_') || customId.startsWith('regen_')) {
+          keyword = customId.split('_')[1];
+        }
+
         const { images, keyword: usedKeyword } = await fetchRandomImages(keyword);
-        if (images.length === 0) return interaction.editReply('❌ Aucune image trouvée.');
+        if (images.length === 0) {
+          await interaction.editReply('❌ Aucune image trouvée.');
+          return;
+        }
 
         const embeds = images.map(img =>
           new EmbedBuilder()
@@ -170,30 +197,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
           embeds,
           components: [row],
         });
-      } catch (e) {
-        console.error('Erreur lors de la génération :', e);
-        await interaction.editReply('❌ Une erreur est survenue.');
+      }
+
+      // ↩️ Retour au menu
+      if (customId === 'back_to_menu') {
+        await interaction.reply({
+          content: '📸 Choisis un mot-clé ou tape le tien pour générer des images depuis Unsplash !',
+          components: getInteractionRows(),
+          ephemeral: true,
+        });
       }
     }
 
-    // 🔁 Revenir au menu
-    if (customId === 'back_to_menu') {
-      await interaction.reply({
-        content: '📸 Choisis un mot-clé ou tape le tien pour générer des images depuis Unsplash !',
-        components: getInteractionRows(),
-        ephemeral: true,
-      });
-    }
-  }
+    // 📩 Soumission du modal
+    if (interaction.isModalSubmit() && interaction.customId === 'custom_keyword_modal') {
+      await interaction.deferReply();
+      const userInput = interaction.fields.getTextInputValue('custom_keyword_input');
 
-  // 📩 Résultat du modal
-  if (interaction.isModalSubmit() && interaction.customId === 'custom_keyword_modal') {
-    await interaction.deferReply();
-    const userInput = interaction.fields.getTextInputValue('custom_keyword_input');
-
-    try {
       const { images, keyword: usedKeyword } = await fetchRandomImages(userInput);
-      if (images.length === 0) return interaction.editReply('❌ Aucune image trouvée.');
+      if (images.length === 0) {
+        await interaction.editReply('❌ Aucune image trouvée.');
+        return;
+      }
 
       const embeds = images.map(img =>
         new EmbedBuilder()
@@ -220,9 +245,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
         embeds,
         components: [row],
       });
-    } catch (e) {
-      console.error('Erreur dans la recherche personnalisée :', e);
-      await interaction.editReply('❌ Une erreur est survenue.');
+    }
+  } catch (e) {
+    console.error('❌ Erreur dans InteractionCreate :', e);
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply('❌ Une erreur est survenue pendant l\'interaction.');
+    } else {
+      await interaction.reply({
+        content: '❌ Une erreur est survenue.',
+        ephemeral: true,
+      });
     }
   }
 });
